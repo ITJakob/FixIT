@@ -8,6 +8,14 @@ export function fileToBase64(file) {
 }
 
 export async function analyzeImage(base64, mediaType) {
+  const endpoint = import.meta.env.VITE_ANALYZE_IMAGE_ENDPOINT || "https://api.anthropic.com/v1/messages";
+  const anthropicKey = import.meta.env.VITE_ANTHROPIC_API_KEY;
+  const usesAnthropicDirectly = endpoint.includes("api.anthropic.com");
+
+  if (usesAnthropicDirectly && !anthropicKey) {
+    throw new Error("Bitte VITE_ANTHROPIC_API_KEY oder VITE_ANALYZE_IMAGE_ENDPOINT konfigurieren.");
+  }
+
   const systemPrompt = `Du bist ein erfahrener Handwerks-Experte und Schadensdiagnostiker.
 Analysiere das hochgeladene Foto auf Schäden und antworte AUSSCHLIESSLICH mit einem JSON-Objekt (kein Markdown, keine Backticks, kein Preamble).
 
@@ -31,9 +39,16 @@ Dringlichkeit:
 - Dringend: Heizung defekt, Fenster kaputt, Schloss defekt, Schaden mit zeitnaher Eskalation.
 - Normal: kosmetische Schäden, kleine Reparaturen, nicht sicherheitskritische Mängel.`;
 
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
+  const headers = { "Content-Type": "application/json" };
+  if (usesAnthropicDirectly) {
+    headers["x-api-key"] = anthropicKey;
+    headers["anthropic-version"] = "2023-06-01";
+    headers["anthropic-dangerous-direct-browser-access"] = "true";
+  }
+
+  const response = await fetch(endpoint, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify({
       model: "claude-sonnet-4-20250514",
       max_tokens: 1000,
