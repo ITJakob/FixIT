@@ -3,6 +3,10 @@ import SchadenCard from "./SchadenCard.jsx";
 import SchadenMelden from "./SchadenMelden.jsx";
 import { supabase } from "../lib/supabase.js";
 
+function buildMailto(to, subject, body) {
+  return "mailto:" + (to || "") + "?subject=" + encodeURIComponent(subject) + "&body=" + encodeURIComponent(body);
+}
+
 export default function MieterDashboard({ C, styles, profile }) {
   const [reports, setReports] = useState([]);
   const [units, setUnits] = useState([]);
@@ -20,8 +24,8 @@ export default function MieterDashboard({ C, styles, profile }) {
 
       try {
         const unitFilter = profile.unit_id
-          ? `tenant_id.eq.${profile.id},id.eq.${profile.unit_id}`
-          : `tenant_id.eq.${profile.id}`;
+          ? "tenant_id.eq." + profile.id + ",id.eq." + profile.unit_id
+          : "tenant_id.eq." + profile.id;
 
         const [{ data: unitData, error: unitError }, { data: reportData, error: reportError }] = await Promise.all([
           supabase.from("units").select("*").or(unitFilter).order("created_at", { ascending: false }),
@@ -44,12 +48,12 @@ export default function MieterDashboard({ C, styles, profile }) {
     loadTenantData();
 
     const channel = supabase
-      ?.channel(`tenant-reports-${profile.id}`)
+      ?.channel("tenant-reports-" + profile.id)
       .on("postgres_changes", {
         event: "*",
         schema: "public",
         table: "damage_reports",
-        filter: `tenant_id=eq.${profile.id}`,
+        filter: "tenant_id=eq." + profile.id,
       }, () => loadTenantData())
       .subscribe();
 
@@ -65,6 +69,33 @@ export default function MieterDashboard({ C, styles, profile }) {
     emergency: reports.filter((report) => report.urgency === "Notfall").length,
   }), [reports]);
 
+  const landlordEmail = useMemo(() => {
+    const linkedUnit = units.find((unit) => unit.id === profile.unit_id) || units[0];
+    return linkedUnit?.landlord_email || "";
+  }, [profile.unit_id, units]);
+
+  const unitLabel = useMemo(() => {
+    const linkedUnit = units.find((unit) => unit.id === profile.unit_id) || units[0];
+    return linkedUnit?.label || linkedUnit?.name || "meiner Wohnung";
+  }, [profile.unit_id, units]);
+
+  const contactHref = buildMailto(
+    landlordEmail,
+    "Rückfrage zu meiner Wohnung / Schadensmeldung",
+    [
+      "Hallo,",
+      "",
+      "ich habe eine Frage zu " + unitLabel + ".",
+      "",
+      "Name: " + (profile.full_name || profile.email),
+      "E-Mail: " + profile.email,
+      "",
+      "Meine Nachricht:",
+      "",
+      "Viele Grüße",
+    ].join("\n"),
+  );
+
   const handleCreated = (report) => {
     setReports((current) => [report, ...current]);
     setShowForm(false);
@@ -79,14 +110,23 @@ export default function MieterDashboard({ C, styles, profile }) {
             Hallo {profile.full_name || profile.email} · Meldungshistorie und Status deiner Schäden
           </div>
         </div>
-        <button
-          style={styles.primaryBtn}
-          onClick={() => setShowForm((current) => !current)}
-          onMouseOver={(e) => (e.currentTarget.style.background = C.orangeHover)}
-          onMouseOut={(e) => (e.currentTarget.style.background = C.orange)}
-        >
-          {showForm ? "Historie anzeigen" : "📸 Neue Meldung"}
-        </button>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "flex-end" }}>
+          <a
+            href={contactHref}
+            style={{ ...styles.secondaryBtn, textDecoration: "none", opacity: landlordEmail ? 1 : 0.7 }}
+            title={landlordEmail ? "Hausverwaltung per E-Mail kontaktieren" : "Noch keine Vermieter-E-Mail in der Einheit hinterlegt"}
+          >
+            ✉️ Hausverwaltung kontaktieren
+          </a>
+          <button
+            style={styles.primaryBtn}
+            onClick={() => setShowForm((current) => !current)}
+            onMouseOver={(e) => (e.currentTarget.style.background = C.orangeHover)}
+            onMouseOut={(e) => (e.currentTarget.style.background = C.orange)}
+          >
+            {showForm ? "Historie anzeigen" : "📸 Neue Meldung"}
+          </button>
+        </div>
       </div>
 
       <div style={styles.statGrid}>
@@ -104,10 +144,25 @@ export default function MieterDashboard({ C, styles, profile }) {
         </div>
       </div>
 
+      <div style={styles.proCard}>
+        <div style={styles.resultHeader}>
+          <div style={styles.resultIconWrap}>✉️</div>
+          <div>
+            <div style={styles.resultTitle}>Direkter Kontakt zur Hausverwaltung</div>
+            <div style={styles.resultSub}>
+              Bei Rückfragen, Zugangsthemen oder Problemen außerhalb einer Schadensmeldung kannst du direkt eine E-Mail vorbereiten.
+            </div>
+          </div>
+        </div>
+        <a href={contactHref} style={{ ...styles.primaryBtn, textDecoration: "none" }}>
+          Hausverwaltung / Vermieter anschreiben
+        </a>
+      </div>
+
       {message && (
         <div style={{
           marginBottom: 16, padding: "10px 14px", background: C.orangeDim,
-          border: `1px solid ${C.orange}33`, borderRadius: 10, fontSize: 13, color: C.text,
+          border: "1px solid " + C.orange + "33", borderRadius: 10, fontSize: 13, color: C.text,
         }}>
           {message}
         </div>

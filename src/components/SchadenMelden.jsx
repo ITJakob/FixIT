@@ -3,7 +3,7 @@ import { analyzeImage, fileToBase64 } from "../lib/analyzeImage.js";
 import { DAMAGE_BUCKET, supabase } from "../lib/supabase.js";
 
 function buildMailto(to, subject, body) {
-  return `mailto:${to}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  return "mailto:" + to + "?subject=" + encodeURIComponent(subject) + "&body=" + encodeURIComponent(body);
 }
 
 function safeFileName(name) {
@@ -25,6 +25,10 @@ export default function SchadenMelden({ C, styles, profile, units = [], onCreate
   const [preview, setPreview] = useState(null);
   const [dragging, setDragging] = useState(false);
   const [selectedUnitId, setSelectedUnitId] = useState(units[0]?.id || profile?.unit_id || "");
+  const [description, setDescription] = useState("");
+  const [issueSince, setIssueSince] = useState("");
+  const [accessWindow, setAccessWindow] = useState("");
+  const [usageRestricted, setUsageRestricted] = useState("Nein");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const inputRef = useRef();
@@ -58,7 +62,17 @@ export default function SchadenMelden({ C, styles, profile, units = [], onCreate
     try {
       const base64 = await fileToBase64(file);
       const diagnosis = await analyzeImage(base64, file.type);
-      const storagePath = `${profile.id}/${Date.now()}-${safeFileName(file.name)}`;
+      const tenantDetails = {
+        beschreibung: description.trim(),
+        seit_wann: issueSince.trim(),
+        zugang_terminwunsch: accessWindow.trim(),
+        nutzung_eingeschraenkt: usageRestricted,
+      };
+      const enrichedDiagnosis = {
+        ...diagnosis,
+        mieter_angaben: tenantDetails,
+      };
+      const storagePath = profile.id + "/" + Date.now() + "-" + safeFileName(file.name);
 
       const { error: uploadError } = await supabase.storage
         .from(DAMAGE_BUCKET)
@@ -78,7 +92,7 @@ export default function SchadenMelden({ C, styles, profile, units = [], onCreate
         tenant_email: profile.email,
         image_url: publicUrl.publicUrl,
         image_path: storagePath,
-        diagnosis,
+        diagnosis: enrichedDiagnosis,
         urgency: diagnosis.dringlichkeit || "Normal",
         status: "Offen",
         notes: "",
@@ -96,8 +110,19 @@ export default function SchadenMelden({ C, styles, profile, units = [], onCreate
         if (landlordEmail) {
           window.location.href = buildMailto(
             landlordEmail,
-            `🔴 Notfall-Schadensmeldung: ${diagnosis.schadenstyp}`,
-            `Es wurde eine Notfall-Meldung für ${report.unit_label} erstellt.\n\nMieter: ${report.tenant_name}\nSchaden: ${diagnosis.schadenstyp}\nBeschreibung: ${diagnosis.beschreibung}\nDringlichkeit: ${report.urgency}`,
+            "🔴 Notfall-Schadensmeldung: " + diagnosis.schadenstyp,
+            [
+              "Es wurde eine Notfall-Meldung für " + report.unit_label + " erstellt.",
+              "",
+              "Mieter: " + report.tenant_name,
+              "Schaden: " + diagnosis.schadenstyp,
+              "Beschreibung: " + diagnosis.beschreibung,
+              "Mieterangabe: " + (tenantDetails.beschreibung || "Keine zusätzliche Beschreibung"),
+              "Seit wann: " + (tenantDetails.seit_wann || "Nicht angegeben"),
+              "Terminwunsch/Zugang: " + (tenantDetails.zugang_terminwunsch || "Nicht angegeben"),
+              "Nutzung eingeschränkt: " + tenantDetails.nutzung_eingeschraenkt,
+              "Dringlichkeit: " + report.urgency,
+            ].join("\n"),
           );
         }
       }
@@ -106,6 +131,10 @@ export default function SchadenMelden({ C, styles, profile, units = [], onCreate
       setMessage("Meldung wurde erstellt und an den Vermieter übermittelt.");
       setFile(null);
       setPreview(null);
+      setDescription("");
+      setIssueSince("");
+      setAccessWindow("");
+      setUsageRestricted("Nein");
     } catch (err) {
       setMessage(err.message || "Fehler bei der Analyse. Bitte versuche es erneut.");
     } finally {
@@ -119,6 +148,13 @@ export default function SchadenMelden({ C, styles, profile, units = [], onCreate
       <p style={{ ...styles.sectionSub, textAlign: "left", marginBottom: 20 }}>
         Lade ein Foto hoch – die KI erkennt das Problem und erstellt automatisch eine Schadensmeldung.
       </p>
+
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 20 }}>
+        <span style={styles.badgePill("Offen")}>1 Wohnung</span>
+        <span style={styles.badgePill("In Bearbeitung")}>2 Angaben</span>
+        <span style={styles.badgePill("Dringend")}>3 Foto</span>
+        <span style={styles.badgePill("Normal")}>4 KI & Absenden</span>
+      </div>
 
       {units.length > 1 && (
         <label style={styles.label}>
@@ -134,6 +170,53 @@ export default function SchadenMelden({ C, styles, profile, units = [], onCreate
           </select>
         </label>
       )}
+
+      <div style={styles.resultCard}>
+        <div style={styles.resultHeader}>
+          <div style={styles.resultIconWrap}>📝</div>
+          <div>
+            <div style={styles.resultTitle}>Kurze Zusatzinfos</div>
+            <div style={styles.resultSub}>Hilft Vermieter und Handwerker bei der schnellen Einordnung</div>
+          </div>
+        </div>
+        <label style={styles.label}>
+          Was ist passiert?
+          <textarea
+            style={styles.textarea}
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="z.B. Unter dem Waschbecken tropft Wasser, sobald der Hahn läuft."
+          />
+        </label>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
+          <label style={styles.label}>
+            Seit wann besteht das Problem?
+            <input
+              style={styles.input}
+              value={issueSince}
+              onChange={(e) => setIssueSince(e.target.value)}
+              placeholder="z.B. seit gestern Abend"
+            />
+          </label>
+          <label style={styles.label}>
+            Nutzung eingeschränkt?
+            <select style={styles.input} value={usageRestricted} onChange={(e) => setUsageRestricted(e.target.value)}>
+              <option>Nein</option>
+              <option>Teilweise</option>
+              <option>Ja</option>
+            </select>
+          </label>
+        </div>
+        <label style={styles.label}>
+          Terminwunsch / Zugangshinweis
+          <input
+            style={styles.input}
+            value={accessWindow}
+            onChange={(e) => setAccessWindow(e.target.value)}
+            placeholder="z.B. werktags ab 17 Uhr erreichbar"
+          />
+        </label>
+      </div>
 
       {!selectedUnit && (
         <div style={styles.proCard}>
@@ -175,7 +258,7 @@ export default function SchadenMelden({ C, styles, profile, units = [], onCreate
       {message && (
         <div style={{
           marginTop: 16, padding: "10px 14px", background: C.orangeDim,
-          border: `1px solid ${C.orange}33`, borderRadius: 10, fontSize: 13, color: C.text,
+          border: "1px solid " + C.orange + "33", borderRadius: 10, fontSize: 13, color: C.text,
         }}>
           {message}
         </div>

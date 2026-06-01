@@ -21,6 +21,16 @@ function formatDate(value) {
   return new Intl.DateTimeFormat("de-DE", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
 }
 
+function mailto(to, subject, body) {
+  return "mailto:" + (to || "") + "?subject=" + encodeURIComponent(subject) + "&body=" + encodeURIComponent(body);
+}
+
+function statusStepStyle(styles, isActive, isDone) {
+  if (isDone) return styles.badgePill("Erledigt");
+  if (isActive) return styles.badgePill("In Bearbeitung");
+  return { ...styles.badgePill("Offen"), opacity: 0.45 };
+}
+
 export default function SchadenCard({
   C,
   styles,
@@ -32,12 +42,30 @@ export default function SchadenCard({
   contactHref,
 }) {
   const diagnosis = parseDiagnosis(report);
+  const tenantDetails = diagnosis.mieter_angaben || {};
   const urgency = report.urgency || diagnosis.dringlichkeit || "Normal";
   const status = report.status || "Offen";
   const title = diagnosis.schadenstyp || "Schadensmeldung";
   const difficulty = diagnosis.schwierigkeit || "Mittel";
   const unitLabel = report.unit_label || report.units?.label || report.units?.name || "Wohnung";
   const tenantName = report.tenant_name || report.profiles?.full_name || report.profiles?.email || "Mieter";
+  const fallbackContactHref = mailto(
+    "",
+    "Auftrag zu " + title,
+    [
+      "Bitte um Rückmeldung zu folgendem Schaden:",
+      "",
+      "Einheit: " + unitLabel,
+      "Mieter: " + tenantName,
+      "Schaden: " + title,
+      "Dringlichkeit: " + urgency,
+      "",
+      "Beschreibung:",
+      diagnosis.beschreibung || "",
+    ].join("\n"),
+  );
+  const statusSteps = ["Offen", "In Bearbeitung", "Erledigt"];
+  const activeIndex = Math.max(0, statusSteps.indexOf(status));
 
   return (
     <div style={styles.resultCard}>
@@ -63,13 +91,35 @@ export default function SchadenCard({
             </p>
           )}
 
-          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: editable ? 14 : 0 }}>
+          {tenantDetails.beschreibung && (
+            <div style={{ marginBottom: 12, padding: "10px 14px", background: C.orangeDim, border: "1px solid " + C.orange + "33", borderRadius: 10 }}>
+              <div style={{ ...styles.resultSub, color: C.orange, marginBottom: 4 }}>Mieterangabe</div>
+              <div style={{ fontSize: 13, color: C.text, lineHeight: 1.5 }}>{tenantDetails.beschreibung}</div>
+              <div style={{ ...styles.resultSub, marginTop: 6 }}>
+                {tenantDetails.seit_wann && "Seit: " + tenantDetails.seit_wann + " · "}
+                {tenantDetails.zugang_terminwunsch && "Zugang: " + tenantDetails.zugang_terminwunsch + " · "}
+                Nutzung eingeschränkt: {tenantDetails.nutzung_eingeschraenkt || "Nein"}
+              </div>
+            </div>
+          )}
+
+          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: editable ? 14 : 12 }}>
             <span style={styles.badgePill(status)}>
               {status === "Erledigt" ? "✓" : status === "In Bearbeitung" ? "◐" : "•"} {status}
             </span>
             {diagnosis.zeitaufwand && <span style={styles.resultSub}>⏱ {diagnosis.zeitaufwand}</span>}
             {diagnosis.kosten_schaetzung && <span style={styles.resultSub}>💶 {diagnosis.kosten_schaetzung}</span>}
           </div>
+
+          {!editable && (
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
+              {statusSteps.map((step, index) => (
+                <span key={step} style={statusStepStyle(styles, index === activeIndex, index < activeIndex)}>
+                  {index + 1}. {step}
+                </span>
+              ))}
+            </div>
+          )}
 
           {editable && (
             <>
@@ -88,7 +138,7 @@ export default function SchadenCard({
                 </label>
                 <div style={{ display: "flex", alignItems: "end" }}>
                   <a
-                    href={contactHref || `mailto:?subject=${encodeURIComponent(`Auftrag zu ${title}`)}&body=${encodeURIComponent(`Bitte um Rückmeldung zu folgendem Schaden:\n\nEinheit: ${unitLabel}\nMieter: ${tenantName}\nSchaden: ${title}\nDringlichkeit: ${urgency}\n\nBeschreibung:\n${diagnosis.beschreibung || ""}`)}`}
+                    href={contactHref || fallbackContactHref}
                     style={{ ...styles.secondaryBtn, textDecoration: "none", textAlign: "center", width: "100%", boxSizing: "border-box" }}
                   >
                     {contactLabel}
